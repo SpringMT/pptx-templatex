@@ -133,7 +133,8 @@ class TemplateEngine:
                     except:
                         pass
                 else:
-                    ref_font_name = "Arial"
+                    # Use None for all formatting - theme will provide defaults
+                    ref_font_name = None
                     ref_font_size = None
                     ref_font_bold = None
                     ref_font_italic = None
