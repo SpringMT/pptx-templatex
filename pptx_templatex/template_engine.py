@@ -63,54 +63,6 @@ class TemplateEngine:
         """
         return SlideCopier.copy_slide(self.template_prs, source_slide_index, target_prs)
 
-    def _normalize_fonts_in_slide(self, slide: Slide):
-        """
-        Normalize font properties in a slide, fixing runs with None font names.
-
-        When PowerPoint creates runs for special characters like {{ }}, it may
-        leave font.name as None. This method inherits font properties from the
-        first run in the paragraph that has a defined font, or applies a default.
-
-        Args:
-            slide: The slide to process
-        """
-        # First, collect all defined fonts in the slide to use as reference
-        slide_fonts = set()
-        for shape in slide.shapes:
-            if hasattr(shape, "text_frame"):
-                for paragraph in shape.text_frame.paragraphs:
-                    for run in paragraph.runs:
-                        if run.text.strip() and run.font.name is not None:
-                            slide_fonts.add(run.font.name)
-
-        # Determine the most common font in the slide (or use first one found)
-        default_font = slide_fonts.pop() if slide_fonts else "Meiryo UI"
-
-        for shape in slide.shapes:
-            if not hasattr(shape, "text_frame"):
-                continue
-
-            for paragraph in shape.text_frame.paragraphs:
-                # Skip empty paragraphs
-                if not paragraph.text.strip():
-                    continue
-
-                # Find the first run with a defined font name to use as reference
-                reference_font_name = None
-                for run in paragraph.runs:
-                    if run.text.strip() and run.font.name is not None:
-                        reference_font_name = run.font.name
-                        break
-
-                # If no reference font found in this paragraph, use the slide's default
-                if reference_font_name is None:
-                    reference_font_name = default_font
-
-                # Apply the reference font to all runs with None font name
-                for run in paragraph.runs:
-                    if run.font.name is None:
-                        run.font.name = reference_font_name
-
     def _replace_placeholders_in_slide(self, slide: Slide, replacements: Dict[str, Any]):
         """
         Replace all {{ }} placeholders in a slide's text with values.
@@ -286,16 +238,13 @@ class TemplateEngine:
             # Since output_prs is also based on the same template, layouts should match
             new_slide = self._copy_slide(src_page - 1, output_prs)
 
-            # Normalize font properties (fix None font names) - first pass
-            self._normalize_fonts_in_slide(new_slide)
+            # Note: Font normalization is no longer needed because the theme is preserved
+            # from the template. Font name: None will use the theme's default font.
+            # self._normalize_fonts_in_slide(new_slide)
 
             # Replace placeholders
             if replace_texts:
                 self._replace_placeholders_in_slide(new_slide, replace_texts)
-
-            # Normalize font properties again after replacement
-            # This ensures all text (including non-placeholder text) has proper fonts
-            self._normalize_fonts_in_slide(new_slide)
 
         # Save output
         try:
