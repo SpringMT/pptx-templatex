@@ -1,0 +1,31 @@
+{
+  "slides": [
+    {
+      "src_page": 1,
+      "replace_texts": {
+        "name": "John Doe",
+        "user": {
+          "email": "john@example.com",
+          "department": "Engineering"
+        },
+        "items": [
+          {
+            "name": "Item 1",
+            "value": "100"
+          },
+          {
+            "name": "Item 2",
+            "value": "200"
+          }
+        ]
+      }
+    },
+    {
+      "src_page": 2,
+      "replace_texts": {
+        "title": "Second Slide",
+        "description": "This is the second slide"
+      }
+    }
+  ]
+}

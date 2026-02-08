@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pptx-templatex"
+version = "0.1.0"
+description = "PowerPoint template engine with slide copying and placeholder replacement"
+authors = [
+    {name = "SpringMT", email = "today.is.sky.blue.sky@gmail.com"}
+]
+requires-python = ">=3.8"
+dependencies = [
+    "python-pptx>=1.0.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+]
+
+[project.scripts]
+pptx-templatex = "pptx_templatex.cli:main"
