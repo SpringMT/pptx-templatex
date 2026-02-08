@@ -30,25 +30,11 @@ class SlideCopier:
         # Ensure target presentation has the same slide size as source
         SlideCopier._copy_slide_size(source_prs, target_prs)
 
-        # Get the source slide's layout relationship ID
-        # This is the most reliable way to match layouts, especially for custom layouts
-        source_slide_part = source_slide.part
-        target_prs_part = target_prs.part
-
-        # Find the layout by matching the slide master and layout relationships
+        # Find the layout by matching the slide master and layout name
         slide_layout = None
         source_layout = source_slide.slide_layout
 
         try:
-            # Get the rId of the slide layout from the source slide
-            source_layout_rId = None
-            for rel_id, rel in source_slide_part.rels.items():
-                if rel.target_part == source_layout.part:
-                    source_layout_rId = rel_id
-                    break
-
-            # Get the layout part's relationship to its slide master
-            source_layout_part = source_layout.part
             source_master = source_layout.slide_master
 
             # In target presentation, find the matching slide master
