@@ -1,10 +1,11 @@
 """Unit tests for TemplateEngine."""
 
 import json
+
 import pytest
-from pathlib import Path
 from pptx import Presentation
 from pptx.util import Inches, Pt
+
 from pptx_templatex import TemplateEngine
 from pptx_templatex.exceptions import TemplateError
 

@@ -3,13 +3,14 @@
 import json
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, Union
+
 from pptx import Presentation
-from pptx.util import Inches
 from pptx.slide import Slide
 from pptx_slide_copier import SlideCopier
-from .placeholder_replacer import PlaceholderReplacer
+
 from .exceptions import TemplateError
+from .placeholder_replacer import PlaceholderReplacer
 
 
 class TemplateEngine:
@@ -89,7 +90,7 @@ class TemplateEngine:
                 # Replace placeholders in the full text
                 try:
                     new_text = PlaceholderReplacer.replace_text(full_text, replacements)
-                except:
+                except Exception:
                     # If replacement fails, skip this paragraph
                     continue
 
@@ -130,7 +131,7 @@ class TemplateEngine:
                             ref_color_type = reference_run.font.color.type
                             if ref_color_type == 1:  # RGB
                                 ref_color_rgb = reference_run.font.color.rgb
-                    except:
+                    except Exception:
                         pass
                 else:
                     # Use None for all formatting - theme will provide defaults
@@ -165,7 +166,7 @@ class TemplateEngine:
                 if ref_color_type == 1 and ref_color_rgb is not None:
                     try:
                         new_run.font.color.rgb = ref_color_rgb
-                    except:
+                    except Exception:
                         pass
 
     def process(
