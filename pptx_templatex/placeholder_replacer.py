@@ -1,7 +1,8 @@
 """Placeholder replacement functionality with nested key support."""
 
 import re
-from typing import Any, Dict, List, Union
+from typing import Any, Dict
+
 from .exceptions import PlaceholderError
 
 

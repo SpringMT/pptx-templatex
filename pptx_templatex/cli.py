@@ -3,8 +3,9 @@
 import argparse
 import sys
 from pathlib import Path
-from .template_engine import TemplateEngine
+
 from .exceptions import TemplateError
+from .template_engine import TemplateEngine
 
 
 def main():

@@ -1,12 +1,13 @@
 """Unit tests for CLI."""
 
 import json
+import sys
+
 import pytest
-from pathlib import Path
 from pptx import Presentation
 from pptx.util import Inches
+
 from pptx_templatex.cli import main
-import sys
 
 
 @pytest.fixture

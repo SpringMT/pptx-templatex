@@ -1,8 +1,9 @@
 """Unit tests for PlaceholderReplacer."""
 
 import pytest
-from pptx_templatex.placeholder_replacer import PlaceholderReplacer
+
 from pptx_templatex.exceptions import PlaceholderError
+from pptx_templatex.placeholder_replacer import PlaceholderReplacer
 
 
 class TestGetNestedValue:
