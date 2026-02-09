@@ -7,7 +7,7 @@ name = "pptx-templatex"
 version = "0.1.0"
 description = "PowerPoint template engine with slide copying and placeholder replacement"
 readme = "README.md"
-license = "MIT"
+license = {text = "MIT"}
 authors = [
     {name = "SpringMT", email = "today.is.sky.blue.sky@gmail.com"}
 ]
