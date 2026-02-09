@@ -49,6 +49,9 @@ pptx-templatex = "pptx_templatex.cli:main"
 testpaths = ["tests"]
 pythonpath = ["."]
 
+[tool.setuptools]
+packages = ["pptx_templatex"]
+
 [tool.ruff]
 line-length = 120
 target-version = "py38"
