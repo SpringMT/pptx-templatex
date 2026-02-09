@@ -7,8 +7,8 @@ from typing import Any, Dict, List, Union
 from pptx import Presentation
 from pptx.util import Inches
 from pptx.slide import Slide
+from pptx_slide_copier import SlideCopier
 from .placeholder_replacer import PlaceholderReplacer
-from .slide_copier import SlideCopier
 from .exceptions import TemplateError
 
 

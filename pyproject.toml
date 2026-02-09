@@ -12,6 +12,7 @@ authors = [
 requires-python = ">=3.8"
 dependencies = [
     "python-pptx>=1.0.2",
+    "pptx-slide-copier>=0.1.0",
 ]
 
 [project.optional-dependencies]
