@@ -6,14 +6,34 @@ build-backend = "setuptools.build_meta"
 name = "pptx-templatex"
 version = "0.1.0"
 description = "PowerPoint template engine with slide copying and placeholder replacement"
+readme = "README.md"
+license = {text = "MIT"}
 authors = [
     {name = "SpringMT", email = "today.is.sky.blue.sky@gmail.com"}
 ]
 requires-python = ">=3.8"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+keywords = ["powerpoint", "pptx", "presentation", "template", "placeholder"]
 dependencies = [
     "python-pptx>=1.0.2",
     "pptx-slide-copier>=0.1.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/SpringMT/pptx-templatex"
+Repository = "https://github.com/SpringMT/pptx-templatex"
+Issues = "https://github.com/SpringMT/pptx-templatex/issues"
 
 [project.optional-dependencies]
 dev = [
@@ -28,6 +48,9 @@ pptx-templatex = "pptx_templatex.cli:main"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+
+[tool.setuptools]
+packages = ["pptx_templatex"]
 
 [tool.ruff]
 line-length = 120
