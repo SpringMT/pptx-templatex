@@ -1,16 +1,22 @@
 """Main template engine for processing PowerPoint files."""
 
+import copy
 import json
 import re
 from pathlib import Path
 from typing import Any, Dict, Union
 
 from pptx import Presentation
+from pptx.dml.color import RGBColor
+from pptx.oxml.ns import qn
 from pptx.slide import Slide
+from pptx.util import Pt
 from pptx_slide_copier import SlideCopier
+import lxml.etree as etree
 
 from .exceptions import TemplateError
 from .placeholder_replacer import PlaceholderReplacer
+from .rich_text_parser import RichParagraph, TextSegment, is_rich_text, parse_rich_text
 
 
 class TemplateEngine:
@@ -64,6 +70,142 @@ class TemplateEngine:
         """
         return SlideCopier.copy_slide(self.template_prs, source_slide_index, target_prs)
 
+    # ------------------------------------------------------------------
+    # Rich-text helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _save_run_fmt(run):
+        """Return a dict of formatting attributes from a run."""
+        fmt: Dict[str, Any] = {
+            "name": run.font.name,
+            "size": run.font.size,
+            "bold": run.font.bold,
+            "italic": run.font.italic,
+            "underline": run.font.underline,
+            "color_type": None,
+            "color_rgb": None,
+        }
+        try:
+            if hasattr(run.font.color, "type"):
+                fmt["color_type"] = run.font.color.type
+                if fmt["color_type"] == 1:
+                    fmt["color_rgb"] = run.font.color.rgb
+        except Exception:
+            pass
+        return fmt
+
+    @staticmethod
+    def _apply_run_fmt(run, fmt: Dict[str, Any]):
+        """Apply saved formatting dict to a run."""
+        if fmt["name"] is not None:
+            run.font.name = fmt["name"]
+        if fmt["size"] is not None:
+            run.font.size = fmt["size"]
+        if fmt["bold"] is not None:
+            run.font.bold = fmt["bold"]
+        if fmt["italic"] is not None:
+            run.font.italic = fmt["italic"]
+        if fmt["underline"] is not None:
+            run.font.underline = fmt["underline"]
+        if fmt["color_type"] == 1 and fmt["color_rgb"] is not None:
+            try:
+                run.font.color.rgb = fmt["color_rgb"]
+            except Exception:
+                pass
+
+    @staticmethod
+    def _apply_segment_fmt(run, seg: TextSegment, base_fmt: Dict[str, Any]):
+        """Apply base formatting then overlay segment-level markup."""
+        if base_fmt["name"] is not None:
+            run.font.name = base_fmt["name"]
+        if base_fmt["size"] is not None:
+            run.font.size = base_fmt["size"]
+        if base_fmt["underline"] is not None:
+            run.font.underline = base_fmt["underline"]
+
+        # bold / italic: markup overrides base when True, else fall back to base
+        run.font.bold = True if seg.bold else base_fmt["bold"]
+        run.font.italic = True if seg.italic else base_fmt["italic"]
+
+        # font size override from markup
+        if seg.size is not None:
+            run.font.size = Pt(seg.size)
+
+        # color: markup takes priority, then base
+        if seg.color is not None:
+            try:
+                r = int(seg.color[0:2], 16)
+                g = int(seg.color[2:4], 16)
+                b = int(seg.color[4:6], 16)
+                run.font.color.rgb = RGBColor(r, g, b)
+            except Exception:
+                pass
+        elif base_fmt["color_type"] == 1 and base_fmt["color_rgb"] is not None:
+            try:
+                run.font.color.rgb = base_fmt["color_rgb"]
+            except Exception:
+                pass
+
+    def _expand_rich_paragraphs(self, paragraph, rich_paras: list, base_fmt: Dict[str, Any]):
+        """
+        Replace a single paragraph with one or more rich-text paragraphs.
+
+        The first RichParagraph reuses the existing paragraph element;
+        subsequent ones are inserted after it in the txBody.
+        """
+        txBody = paragraph._p.getparent()
+        ref_p = paragraph._p
+        insert_idx = list(txBody).index(ref_p)
+
+        for para_idx, rich_para in enumerate(rich_paras):
+            if para_idx == 0:
+                # Reuse the existing paragraph element
+                p_elem = ref_p
+                # Clear existing runs
+                paragraph.clear()
+            else:
+                # Create a new paragraph by deep-copying the original
+                p_elem = copy.deepcopy(ref_p)
+                # Remove any runs carried over from the copy
+                for r in p_elem.findall(qn("a:r")):
+                    p_elem.remove(r)
+                insert_idx += 1
+                txBody.insert(insert_idx, p_elem)
+
+            # Apply bullet formatting
+            pPr = p_elem.find(qn("a:pPr"))
+            if pPr is None:
+                pPr = etree.SubElement(p_elem, qn("a:pPr"))
+                p_elem.insert(0, pPr)
+
+            # Remove any existing bullet elements before (re-)applying
+            for tag in (qn("a:buNone"), qn("a:buChar"), qn("a:buAutoNum")):
+                for el in pPr.findall(tag):
+                    pPr.remove(el)
+
+            if rich_para.bullet:
+                bu = etree.SubElement(pPr, qn("a:buChar"))
+                bu.set("char", "•")
+            else:
+                # Explicitly suppress inherited bullets so non-bullet lines
+                # inside a bullet-styled text box are rendered correctly.
+                etree.SubElement(pPr, qn("a:buNone"))
+
+            # Add a run for each segment
+            for seg in rich_para.segments:
+                r_elem = etree.SubElement(p_elem, qn("a:r"))
+                t_elem = etree.SubElement(r_elem, qn("a:t"))
+                t_elem.text = seg.text
+
+                # Build a temporary run object to leverage python-pptx font API
+                from pptx.oxml import parse_xml
+                from pptx.text.text import _Run  # noqa: PLC0415
+                tmp_run = _Run(r_elem, paragraph)
+                self._apply_segment_fmt(tmp_run, seg, base_fmt)
+
+    # ------------------------------------------------------------------
+
     def _replace_placeholders_in_slide(self, slide: Slide, replacements: Dict[str, Any]):
         """
         Replace all {{ }} placeholders in a slide's text with values.
@@ -115,59 +257,25 @@ class TemplateEngine:
                 if reference_run is None and len(paragraph.runs) > 0:
                     reference_run = paragraph.runs[0]
 
-                # Save formatting from reference run
-                if reference_run:
-                    ref_font_name = reference_run.font.name
-                    ref_font_size = reference_run.font.size
-                    ref_font_bold = reference_run.font.bold
-                    ref_font_italic = reference_run.font.italic
-                    ref_font_underline = reference_run.font.underline
+                base_fmt = self._save_run_fmt(reference_run) if reference_run else {
+                    "name": None, "size": None, "bold": None, "italic": None,
+                    "underline": None, "color_type": None, "color_rgb": None,
+                }
 
-                    # Save color
-                    ref_color_type = None
-                    ref_color_rgb = None
-                    try:
-                        if hasattr(reference_run.font.color, 'type'):
-                            ref_color_type = reference_run.font.color.type
-                            if ref_color_type == 1:  # RGB
-                                ref_color_rgb = reference_run.font.color.rgb
-                    except Exception:
-                        pass
-                else:
-                    # Use None for all formatting - theme will provide defaults
-                    ref_font_name = None
-                    ref_font_size = None
-                    ref_font_bold = None
-                    ref_font_italic = None
-                    ref_font_underline = None
-                    ref_color_type = None
-                    ref_color_rgb = None
+                # --- Rich text path ---
+                if is_rich_text(new_text):
+                    rich_paras = parse_rich_text(new_text)
+                    self._expand_rich_paragraphs(paragraph, rich_paras, base_fmt)
+                    continue
 
+                # --- Plain text path (original behaviour) ---
                 # Clear all existing runs
                 paragraph.clear()
 
                 # Create a new run with the replaced text
                 new_run = paragraph.add_run()
                 new_run.text = new_text
-
-                # Apply the saved formatting
-                if ref_font_name is not None:
-                    new_run.font.name = ref_font_name
-                if ref_font_size is not None:
-                    new_run.font.size = ref_font_size
-                if ref_font_bold is not None:
-                    new_run.font.bold = ref_font_bold
-                if ref_font_italic is not None:
-                    new_run.font.italic = ref_font_italic
-                if ref_font_underline is not None:
-                    new_run.font.underline = ref_font_underline
-
-                # Apply color
-                if ref_color_type == 1 and ref_color_rgb is not None:
-                    try:
-                        new_run.font.color.rgb = ref_color_rgb
-                    except Exception:
-                        pass
+                self._apply_run_fmt(new_run, base_fmt)
 
     def process(
         self,
