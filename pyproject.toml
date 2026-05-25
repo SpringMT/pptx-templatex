@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pptx-templatex"
-version = "0.1.2"
+version = "0.1.3"
 description = "PowerPoint template engine with slide copying and placeholder replacement"
 readme = "README.md"
 license = {text = "MIT"}
