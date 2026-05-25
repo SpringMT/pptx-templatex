@@ -224,11 +224,16 @@ class TemplateEngine:
                 # inside a bullet-styled text box are rendered correctly.
                 etree.SubElement(pPr, qn("a:buNone"))
 
-            # Add a run for each segment
+            # Add a run for each segment — insert before endParaRPr if present
+            end_par_rpr = p_elem.find(qn("a:endParaRPr"))
             for seg in rich_para.segments:
+                # SubElement で追加してから endParaRPr の前に移動
                 r_elem = etree.SubElement(p_elem, qn("a:r"))
                 t_elem = etree.SubElement(r_elem, qn("a:t"))
                 t_elem.text = seg.text
+
+                if end_par_rpr is not None:
+                    end_par_rpr.addprevious(r_elem)
 
                 # Build a temporary run object to leverage python-pptx font API
                 from pptx.text.text import _Run  # noqa: PLC0415
