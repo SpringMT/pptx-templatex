@@ -6,17 +6,17 @@ import re
 from pathlib import Path
 from typing import Any, Dict, Union
 
+import lxml.etree as etree
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 from pptx.oxml.ns import qn
 from pptx.slide import Slide
 from pptx.util import Pt
 from pptx_slide_copier import SlideCopier
-import lxml.etree as etree
 
 from .exceptions import TemplateError
 from .placeholder_replacer import PlaceholderReplacer
-from .rich_text_parser import RichParagraph, TextSegment, is_rich_text, parse_rich_text
+from .rich_text_parser import TextSegment, is_rich_text, parse_rich_text
 
 
 class TemplateEngine:
@@ -199,7 +199,6 @@ class TemplateEngine:
                 t_elem.text = seg.text
 
                 # Build a temporary run object to leverage python-pptx font API
-                from pptx.oxml import parse_xml
                 from pptx.text.text import _Run  # noqa: PLC0415
                 tmp_run = _Run(r_elem, paragraph)
                 self._apply_segment_fmt(tmp_run, seg, base_fmt)

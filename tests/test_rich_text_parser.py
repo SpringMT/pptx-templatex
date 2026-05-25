@@ -1,7 +1,5 @@
 """Unit tests for rich_text_parser."""
 
-import pytest
-
 from pptx_templatex.rich_text_parser import is_rich_text, parse_rich_text
 
 
