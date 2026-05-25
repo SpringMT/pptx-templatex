@@ -77,6 +77,7 @@ class TemplateEngine:
     @staticmethod
     def _save_run_fmt(run):
         """Return a dict of formatting attributes from a run."""
+        from pptx.oxml.ns import qn
         fmt: Dict[str, Any] = {
             "name": run.font.name,
             "size": run.font.size,
@@ -85,12 +86,22 @@ class TemplateEngine:
             "underline": run.font.underline,
             "color_type": None,
             "color_rgb": None,
+            "color_scheme_xml": None,
         }
         try:
+            from pptx.enum.dml import MSO_COLOR_TYPE
             if hasattr(run.font.color, "type"):
                 fmt["color_type"] = run.font.color.type
-                if fmt["color_type"] == 1:
+                if fmt["color_type"] == MSO_COLOR_TYPE.RGB:
                     fmt["color_rgb"] = run.font.color.rgb
+                elif fmt["color_type"] is not None:
+                    # schemeClr など RGB以外のカラー指定: XMLノードをそのまま保存
+                    rPr = run._r.find(qn("a:rPr"))
+                    if rPr is not None:
+                        solidFill = rPr.find(qn("a:solidFill"))
+                        if solidFill is not None:
+                            import copy
+                            fmt["color_scheme_xml"] = copy.deepcopy(solidFill)
         except Exception:
             pass
         return fmt
@@ -98,6 +109,7 @@ class TemplateEngine:
     @staticmethod
     def _apply_run_fmt(run, fmt: Dict[str, Any]):
         """Apply saved formatting dict to a run."""
+        from pptx.oxml.ns import qn
         if fmt["name"] is not None:
             run.font.name = fmt["name"]
         if fmt["size"] is not None:
@@ -108,9 +120,25 @@ class TemplateEngine:
             run.font.italic = fmt["italic"]
         if fmt["underline"] is not None:
             run.font.underline = fmt["underline"]
-        if fmt["color_type"] == 1 and fmt["color_rgb"] is not None:
+        from pptx.enum.dml import MSO_COLOR_TYPE
+        if fmt["color_type"] == MSO_COLOR_TYPE.RGB and fmt["color_rgb"] is not None:
             try:
                 run.font.color.rgb = fmt["color_rgb"]
+            except Exception:
+                pass
+        elif fmt["color_scheme_xml"] is not None:
+            # schemeClr などをXMLレベルで復元
+            try:
+                import copy
+                import lxml.etree as etree
+                rPr = run._r.find(qn("a:rPr"))
+                if rPr is None:
+                    rPr = etree.SubElement(run._r, qn("a:rPr"))
+                    run._r.insert(0, rPr)
+                existing = rPr.find(qn("a:solidFill"))
+                if existing is not None:
+                    rPr.remove(existing)
+                rPr.insert(0, copy.deepcopy(fmt["color_scheme_xml"]))
             except Exception:
                 pass
 
@@ -133,6 +161,7 @@ class TemplateEngine:
             run.font.size = Pt(seg.size)
 
         # color: markup takes priority, then base
+        from pptx.enum.dml import MSO_COLOR_TYPE
         if seg.color is not None:
             try:
                 r = int(seg.color[0:2], 16)
@@ -141,9 +170,21 @@ class TemplateEngine:
                 run.font.color.rgb = RGBColor(r, g, b)
             except Exception:
                 pass
-        elif base_fmt["color_type"] == 1 and base_fmt["color_rgb"] is not None:
+        elif base_fmt["color_type"] == MSO_COLOR_TYPE.RGB and base_fmt["color_rgb"] is not None:
             try:
                 run.font.color.rgb = base_fmt["color_rgb"]
+            except Exception:
+                pass
+        elif base_fmt["color_scheme_xml"] is not None:
+            try:
+                import copy
+                from pptx.oxml.ns import qn
+                rPr = run._r.find(qn("a:rPr"))
+                if rPr is not None:
+                    existing = rPr.find(qn("a:solidFill"))
+                    if existing is not None:
+                        rPr.remove(existing)
+                    rPr.insert(0, copy.deepcopy(base_fmt["color_scheme_xml"]))
             except Exception:
                 pass
 
