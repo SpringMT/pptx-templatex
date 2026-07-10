@@ -3,5 +3,5 @@
 from .exceptions import PlaceholderError, TemplateError
 from .template_engine import TemplateEngine
 
-__version__ = "0.1.0"
+__version__ = "0.1.3"
 __all__ = ["TemplateEngine", "TemplateError", "PlaceholderError"]
