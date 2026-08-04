@@ -242,76 +242,144 @@ class TemplateEngine:
 
     # ------------------------------------------------------------------
 
+    def _expand_table_rows(self, slide: Slide, table_rows: Dict[str, list]):
+        """
+        Expand table template rows into one row per data item.
+
+        A "template row" is a table row whose cells contain placeholders of the
+        form ``{{ <key>.<field> }}`` where ``<key>`` is a key in ``table_rows``.
+        The row is duplicated once per item (inheriting borders, fill and fonts
+        from the template row), each copy's placeholders are resolved against
+        that item, and the template row itself is removed. An empty list removes
+        the template row without inserting anything.
+
+        Args:
+            slide: The slide to process
+            table_rows: Mapping of row-set key to a list of row dicts
+                (e.g. ``{"rows": [{"c1": "...", "c2": "..."}, ...]}``)
+        """
+        from copy import deepcopy
+
+        from pptx.table import _Cell
+
+        for shape in slide.shapes:
+            if not getattr(shape, "has_table", False):
+                continue
+            tbl = shape.table._tbl
+            for tr in list(tbl.tr_lst):
+                row_text = " ".join(
+                    _Cell(tc, tr).text_frame.text for tc in tr.tc_lst
+                )
+                matched_key = next(
+                    (
+                        key
+                        for key in table_rows
+                        if re.search(r"\{\{\s*" + re.escape(key) + r"\.", row_text)
+                    ),
+                    None,
+                )
+                if matched_key is None:
+                    continue
+
+                parent = tr.getparent()
+                insert_at = parent.index(tr)
+                for offset, item in enumerate(table_rows[matched_key]):
+                    new_tr = deepcopy(tr)
+                    parent.insert(insert_at + offset, new_tr)
+                    for tc in new_tr.tc_lst:
+                        self._replace_placeholders_in_text_frame(
+                            _Cell(tc, new_tr).text_frame, {matched_key: item}
+                        )
+                parent.remove(tr)
+
     def _replace_placeholders_in_slide(self, slide: Slide, replacements: Dict[str, Any]):
         """
         Replace all {{ }} placeholders in a slide's text with values.
 
-        Since PowerPoint may split placeholders across multiple runs,
-        we need to process the entire paragraph text at once.
+        Traverses plain shapes' text frames and table cells' text frames.
 
         Args:
             slide: The slide to process
             replacements: Dictionary with replacement values
         """
         for shape in slide.shapes:
+            if getattr(shape, "has_table", False):
+                for row in shape.table.rows:
+                    for cell in row.cells:
+                        self._replace_placeholders_in_text_frame(cell.text_frame, replacements)
+                continue
+
             if not hasattr(shape, "text_frame"):
                 continue
 
-            for paragraph in shape.text_frame.paragraphs:
-                # Get the full paragraph text
-                full_text = paragraph.text
+            self._replace_placeholders_in_text_frame(shape.text_frame, replacements)
 
-                # Check if there are any placeholders in this paragraph
-                if "{{" not in full_text or "}}" not in full_text:
-                    continue
+    def _replace_placeholders_in_text_frame(self, text_frame, replacements: Dict[str, Any]):
+        """
+        Replace all {{ }} placeholders in a text frame.
 
-                # Replace placeholders in the full text
-                try:
-                    new_text = PlaceholderReplacer.replace_text(full_text, replacements)
-                except Exception:
-                    # If replacement fails, skip this paragraph
-                    continue
+        Since PowerPoint may split placeholders across multiple runs,
+        we need to process the entire paragraph text at once.
 
-                # If text hasn't changed, skip
-                if new_text == full_text:
-                    continue
+        Args:
+            text_frame: The text frame to process
+            replacements: Dictionary with replacement values
+        """
+        for paragraph in text_frame.paragraphs:
+            # Get the full paragraph text
+            full_text = paragraph.text
 
-                # Clean control characters from the replaced text
-                # Convert vertical tab (0x0B) to newline - PowerPoint uses this for soft line breaks
-                new_text = new_text.replace('\x0B', '\n')
-                # Remove other control characters (except \n and \r)
-                new_text = re.sub(r'[\x00-\x08\x0C\x0E-\x1F]', '', new_text)
+            # Check if there are any placeholders in this paragraph
+            if "{{" not in full_text or "}}" not in full_text:
+                continue
 
-                # Find the first run with defined formatting to use as reference
-                reference_run = None
-                for run in paragraph.runs:
-                    if run.font.name is not None:
-                        reference_run = run
-                        break
+            # Replace placeholders in the full text
+            try:
+                new_text = PlaceholderReplacer.replace_text(full_text, replacements)
+            except Exception:
+                # If replacement fails, skip this paragraph
+                continue
 
-                # If no reference found, use the first run
-                if reference_run is None and len(paragraph.runs) > 0:
-                    reference_run = paragraph.runs[0]
+            # If text hasn't changed, skip
+            if new_text == full_text:
+                continue
 
-                base_fmt = self._save_run_fmt(reference_run) if reference_run else {
-                    "name": None, "size": None, "bold": None, "italic": None,
-                    "underline": None, "color_type": None, "color_rgb": None,
-                }
+            # Clean control characters from the replaced text
+            # Convert vertical tab (0x0B) to newline - PowerPoint uses this for soft line breaks
+            new_text = new_text.replace('\x0B', '\n')
+            # Remove other control characters (except \n and \r)
+            new_text = re.sub(r'[\x00-\x08\x0C\x0E-\x1F]', '', new_text)
 
-                # --- Rich text path ---
-                if is_rich_text(new_text):
-                    rich_paras = parse_rich_text(new_text)
-                    self._expand_rich_paragraphs(paragraph, rich_paras, base_fmt)
-                    continue
+            # Find the first run with defined formatting to use as reference
+            reference_run = None
+            for run in paragraph.runs:
+                if run.font.name is not None:
+                    reference_run = run
+                    break
 
-                # --- Plain text path (original behaviour) ---
-                # Clear all existing runs
-                paragraph.clear()
+            # If no reference found, use the first run
+            if reference_run is None and len(paragraph.runs) > 0:
+                reference_run = paragraph.runs[0]
 
-                # Create a new run with the replaced text
-                new_run = paragraph.add_run()
-                new_run.text = new_text
-                self._apply_run_fmt(new_run, base_fmt)
+            base_fmt = self._save_run_fmt(reference_run) if reference_run else {
+                "name": None, "size": None, "bold": None, "italic": None,
+                "underline": None, "color_type": None, "color_rgb": None,
+            }
+
+            # --- Rich text path ---
+            if is_rich_text(new_text):
+                rich_paras = parse_rich_text(new_text)
+                self._expand_rich_paragraphs(paragraph, rich_paras, base_fmt)
+                continue
+
+            # --- Plain text path (original behaviour) ---
+            # Clear all existing runs
+            paragraph.clear()
+
+            # Create a new run with the replaced text
+            new_run = paragraph.add_run()
+            new_run.text = new_text
+            self._apply_run_fmt(new_run, base_fmt)
 
     def process(
         self,
@@ -367,6 +435,14 @@ class TemplateEngine:
 
             src_page = slide_config["src_page"]
             replace_texts = slide_config.get("replace_texts", {})
+            replace_table_rows = slide_config.get("replace_table_rows", {})
+            if not isinstance(replace_table_rows, dict) or any(
+                not isinstance(rows, list) or any(not isinstance(item, dict) for item in rows)
+                for rows in replace_table_rows.values()
+            ):
+                raise TemplateError(
+                    f"'replace_table_rows' at index {idx} must be a dict of lists of dicts"
+                )
 
             # Validate src_page
             if not isinstance(src_page, int) or src_page < 1:
@@ -388,7 +464,9 @@ class TemplateEngine:
             # from the template. Font name: None will use the theme's default font.
             # self._normalize_fonts_in_slide(new_slide)
 
-            # Replace placeholders
+            # Expand variable-length table rows first, then replace placeholders
+            if replace_table_rows:
+                self._expand_table_rows(new_slide, replace_table_rows)
             if replace_texts:
                 self._replace_placeholders_in_slide(new_slide, replace_texts)
 
