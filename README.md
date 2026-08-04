@@ -11,6 +11,7 @@ A PowerPoint template engine for Python that provides slide copying and placehol
 - Support for nested object access (e.g., `{{ user.name }}`, `{{ company.department.name }}`)
 - Support for array element access (e.g., `{{ items[0].name }}`, `{{ users.[0].email }}`)
 - Batch processing with JSON configuration files
+- Table support: placeholder replacement in cells and variable-length row expansion (`replace_table_rows`)
 
 ## Installation
 
@@ -255,6 +256,38 @@ This creates a 3-slide presentation with all placeholders replaced.
 - `slides` (required): Array of slide configurations
   - `src_page` (required): Source slide number to copy (1-based index)
   - `replace_texts` (optional): Mapping of text to replace
+  - `replace_table_rows` (optional): Mapping of row-set key to a list of row dicts
+    for variable-length table expansion (see below)
+
+### Tables
+
+Placeholders inside native table cells are replaced the same way as text boxes
+(via `replace_texts`, rich text supported).
+
+For variable-length rows, put a single **template row** in the table whose cells
+contain `{{ <key>.<field> }}` placeholders, and pass the row data via
+`replace_table_rows`:
+
+```json
+{
+  "slides": [
+    {
+      "src_page": 1,
+      "replace_table_rows": {
+        "rows": [
+          {"c1": "Typhoon approach", "c2": "Moved schedule up", "c3": "Completed"},
+          {"c1": "Speaker absent", "c2": "Switched to video", "c3": "Completed"}
+        ]
+      }
+    }
+  ]
+}
+```
+
+The template row (cells containing `{{ rows.c1 }}`, `{{ rows.c2 }}`, ...) is
+duplicated once per item — inheriting the row's borders, fill and fonts — and
+then removed. An empty list removes the template row without inserting anything.
+Rows whose key is not present in `replace_table_rows` are left untouched.
 
 ### Placeholder Syntax
 

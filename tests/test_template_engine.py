@@ -477,3 +477,161 @@ class TestCopySlide:
                             # Font name can be None, which means use theme's default font
                             # This is valid and will be rendered correctly by PowerPoint
                             assert run.text == "Sample"
+
+
+@pytest.fixture
+def table_template(temp_dir):
+    """Create a template with a native table (header row + template row)."""
+    template_path = temp_dir / "table_template.pptx"
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[5])
+    frame = slide.shapes.add_table(2, 3, Inches(1), Inches(1), Inches(8), Inches(2))
+    table = frame.table
+    for col, head in enumerate(("{{ head1 }}", "{{ head2 }}", "Result")):
+        table.cell(0, col).text = head
+    for col in range(3):
+        table.cell(1, col).text = f"{{{{ rows.c{col + 1} }}}}"
+    prs.save(str(template_path))
+    return template_path
+
+
+def _get_table(pptx_path):
+    prs = Presentation(str(pptx_path))
+    for shape in prs.slides[0].shapes:
+        if getattr(shape, "has_table", False):
+            return shape.table
+    raise AssertionError("no table found")
+
+
+class TestTemplateEngineTableRows:
+    """Tests for table cell replacement and variable-row expansion."""
+
+    def test_replace_texts_reaches_table_cells(self, table_template, temp_dir):
+        """Header placeholders inside table cells are replaced via replace_texts."""
+        engine = TemplateEngine(table_template)
+        output = temp_dir / "out.pptx"
+        engine.process(
+            {"slides": [{"src_page": 1, "replace_texts": {"head1": "Event", "head2": "Action"}}]},
+            output,
+        )
+        table = _get_table(output)
+        assert table.cell(0, 0).text == "Event"
+        assert table.cell(0, 1).text == "Action"
+
+    def test_expand_table_rows(self, table_template, temp_dir):
+        """The template row is duplicated once per data item."""
+        engine = TemplateEngine(table_template)
+        output = temp_dir / "out.pptx"
+        engine.process(
+            {
+                "slides": [
+                    {
+                        "src_page": 1,
+                        "replace_table_rows": {
+                            "rows": [
+                                {"c1": "a1", "c2": "a2", "c3": "a3"},
+                                {"c1": "b1", "c2": "b2", "c3": "b3"},
+                                {"c1": "c1v", "c2": "c2v", "c3": "c3v"},
+                            ]
+                        },
+                    }
+                ]
+            },
+            output,
+        )
+        table = _get_table(output)
+        rows = list(table.rows)
+        assert len(rows) == 4  # header + 3 data rows
+        assert table.cell(1, 0).text == "a1"
+        assert table.cell(2, 1).text == "b2"
+        assert table.cell(3, 2).text == "c3v"
+
+    def test_expand_table_rows_empty_list_removes_template_row(self, table_template, temp_dir):
+        """An empty list removes the template row entirely."""
+        engine = TemplateEngine(table_template)
+        output = temp_dir / "out.pptx"
+        engine.process(
+            {"slides": [{"src_page": 1, "replace_table_rows": {"rows": []}}]},
+            output,
+        )
+        table = _get_table(output)
+        assert len(list(table.rows)) == 1  # header only
+
+    def test_expand_table_rows_missing_key_leaves_row(self, table_template, temp_dir):
+        """A template row whose key is not provided is left untouched."""
+        engine = TemplateEngine(table_template)
+        output = temp_dir / "out.pptx"
+        engine.process(
+            {"slides": [{"src_page": 1, "replace_table_rows": {"other": [{"x": "1"}]}}]},
+            output,
+        )
+        table = _get_table(output)
+        assert len(list(table.rows)) == 2
+        assert table.cell(1, 0).text == "{{ rows.c1 }}"
+
+    def test_expand_table_rows_rich_text_in_cell(self, table_template, temp_dir):
+        """Rich text markup works inside expanded cells."""
+        engine = TemplateEngine(table_template)
+        output = temp_dir / "out.pptx"
+        engine.process(
+            {
+                "slides": [
+                    {
+                        "src_page": 1,
+                        "replace_table_rows": {
+                            "rows": [{"c1": "**bold** plain", "c2": "x", "c3": "y"}]
+                        },
+                    }
+                ]
+            },
+            output,
+        )
+        table = _get_table(output)
+        cell = table.cell(1, 0)
+        runs = cell.text_frame.paragraphs[0].runs
+        assert cell.text == "bold plain"
+        assert runs[0].font.bold is True
+
+    def test_expand_table_rows_inherits_template_row_format(self, table_template, temp_dir):
+        """Expanded rows keep the template row's cell fill (format inheritance)."""
+        from pptx.dml.color import RGBColor as _RGB
+
+        # 事前にテンプレート行へ塗りを付けた版を作る
+        prs = Presentation(str(table_template))
+        table = None
+        for shape in prs.slides[0].shapes:
+            if getattr(shape, "has_table", False):
+                table = shape.table
+        cell = table.cell(1, 0)
+        cell.fill.solid()
+        cell.fill.fore_color.rgb = _RGB(0x11, 0x22, 0x33)
+        colored = table_template.parent / "colored.pptx"
+        prs.save(str(colored))
+
+        engine = TemplateEngine(colored)
+        output = table_template.parent / "out.pptx"
+        engine.process(
+            {
+                "slides": [
+                    {
+                        "src_page": 1,
+                        "replace_table_rows": {
+                            "rows": [{"c1": "a", "c2": "b", "c3": "c"}, {"c1": "d", "c2": "e", "c3": "f"}]
+                        },
+                    }
+                ]
+            },
+            output,
+        )
+        out_table = _get_table(output)
+        for row_idx in (1, 2):
+            assert out_table.cell(row_idx, 0).fill.fore_color.rgb == _RGB(0x11, 0x22, 0x33)
+
+    def test_invalid_replace_table_rows_raises(self, table_template, temp_dir):
+        """Non list-of-dicts values are rejected."""
+        engine = TemplateEngine(table_template)
+        with pytest.raises(TemplateError, match="replace_table_rows"):
+            engine.process(
+                {"slides": [{"src_page": 1, "replace_table_rows": {"rows": "not-a-list"}}]},
+                temp_dir / "out.pptx",
+            )
