@@ -283,6 +283,32 @@ pptx-templatex template.pptx config.json hanako_presentation.pptx
 空リストを渡すとテンプレート行だけが削除されます。`replace_table_rows` に
 キーが無い行はそのまま残ります。
 
+### 画像埋め込み
+
+テンプレートに ``{{ img:key }}`` と書いたテキストシェイプ（マーカー）を置くと、
+その位置・サイズに画像が配置され、マーカーは削除されます:
+
+```json
+{
+  "slides": [
+    {
+      "src_page": 1,
+      "replace_images": {
+        "photo1": {"path": "photos/cover.png", "fit": "cover"},
+        "photo2": {"path": "photos/page.png", "fit": "contain"}
+      }
+    }
+  ]
+}
+```
+
+- 画像ソース: ``path``（ファイルパス）または ``data``（bytes・プログラム利用時）
+- ``fit``: ``"contain"``（既定。枠内に収めて中央配置・切らない）/
+  ``"cover"``（枠を満たす中央クロップ）
+- ``replace_images`` にキーが無いマーカーは**削除**されます（マーカー文字列が出力に
+  漏れない）。キーはスライド単位で解決されるため、同じテンプレページを複数回コピーして
+  別々の画像を入れられます
+
 ### プレースホルダーの記法
 
 - 単純な置換: `{{ key }}`
