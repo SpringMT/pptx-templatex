@@ -21,7 +21,6 @@ from .exceptions import TemplateError
 from .placeholder_replacer import PlaceholderReplacer
 from .rich_text_parser import TextSegment, is_rich_text, parse_rich_text
 
-
 # `{{ img:key }}` 画像マーカー。key は英数・. - _ [ ] を許可（nested/index キーに合わせる）。
 _IMG_MARKER = re.compile(r"\{\{\s*img:([\w.\-\[\]]+)\s*\}\}")
 
@@ -505,7 +504,9 @@ class TemplateEngine:
             replace_texts = slide_config.get("replace_texts", {})
             replace_table_rows = slide_config.get("replace_table_rows", {})
             replace_images = slide_config.get("replace_images", {})
-            if not isinstance(replace_images, dict) or any(not isinstance(spec, dict) for spec in replace_images.values()):
+            if not isinstance(replace_images, dict) or any(
+                not isinstance(spec, dict) for spec in replace_images.values()
+            ):
                 raise TemplateError(f"'replace_images' at index {idx} must be a dict of image spec dicts")
             if not isinstance(replace_table_rows, dict) or any(
                 not isinstance(rows, list) or any(not isinstance(item, dict) for item in rows)

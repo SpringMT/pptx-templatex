@@ -652,8 +652,9 @@ def image_template(temp_dir):
 
 
 def _png_bytes(width=200, height=100):
-    from PIL import Image as PILImage
     import io as _io
+
+    from PIL import Image as PILImage
 
     buffer = _io.BytesIO()
     PILImage.new("RGB", (width, height), "navy").save(buffer, format="PNG")
