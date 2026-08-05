@@ -12,6 +12,7 @@ A PowerPoint template engine for Python that provides slide copying and placehol
 - Support for array element access (e.g., `{{ items[0].name }}`, `{{ users.[0].email }}`)
 - Batch processing with JSON configuration files
 - Table support: placeholder replacement in cells and variable-length row expansion (`replace_table_rows`)
+- Image embedding: `{{ img:key }}` marker shapes replaced by images with `contain`/`cover` fitting (`replace_images`)
 
 ## Installation
 
@@ -258,6 +259,8 @@ This creates a 3-slide presentation with all placeholders replaced.
   - `replace_texts` (optional): Mapping of text to replace
   - `replace_table_rows` (optional): Mapping of row-set key to a list of row dicts
     for variable-length table expansion (see below)
+  - `replace_images` (optional): Mapping of `{{ img:key }}` marker key to an image spec
+    (see below)
 
 ### Tables
 
@@ -288,6 +291,32 @@ The template row (cells containing `{{ rows.c1 }}`, `{{ rows.c2 }}`, ...) is
 duplicated once per item — inheriting the row's borders, fill and fonts — and
 then removed. An empty list removes the template row without inserting anything.
 Rows whose key is not present in `replace_table_rows` are left untouched.
+
+### Images
+
+Put a text shape containing ``{{ img:key }}`` in the template (the marker). The image is
+placed at the marker shape's position/size and the marker is removed:
+
+```json
+{
+  "slides": [
+    {
+      "src_page": 1,
+      "replace_images": {
+        "photo1": {"path": "photos/cover.png", "fit": "cover"},
+        "photo2": {"path": "photos/page.png", "fit": "contain"}
+      }
+    }
+  ]
+}
+```
+
+- Image source: ``path`` (file path) or ``data`` (bytes, programmatic use only)
+- ``fit``: ``"contain"`` (default) letterboxes inside the marker bounds without cropping;
+  ``"cover"`` fills the bounds with a centered crop
+- Markers whose key is not present in ``replace_images`` are **removed** (no marker text
+  leaks into the output). Keys are resolved per slide, so copying the same template page
+  multiple times with different images just works
 
 ### Placeholder Syntax
 

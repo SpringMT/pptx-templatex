@@ -1,12 +1,14 @@
 """Main template engine for processing PowerPoint files."""
 
 import copy
+import io
 import json
 import re
 from pathlib import Path
 from typing import Any, Dict, Union
 
 import lxml.etree as etree
+from PIL import Image
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 from pptx.enum.dml import MSO_COLOR_TYPE
@@ -18,6 +20,10 @@ from pptx_slide_copier import SlideCopier
 from .exceptions import TemplateError
 from .placeholder_replacer import PlaceholderReplacer
 from .rich_text_parser import TextSegment, is_rich_text, parse_rich_text
+
+
+# `{{ img:key }}` 画像マーカー。key は英数・. - _ [ ] を許可（nested/index キーに合わせる）。
+_IMG_MARKER = re.compile(r"\{\{\s*img:([\w.\-\[\]]+)\s*\}\}")
 
 
 class TemplateEngine:
@@ -242,6 +248,68 @@ class TemplateEngine:
 
     # ------------------------------------------------------------------
 
+    def _replace_images(self, slide: Slide, images: Dict[str, dict]):
+        """
+        Replace ``{{ img:key }}`` marker shapes with images.
+
+        A marker is a text shape whose text contains ``{{ img:key }}``. The image is
+        placed at the marker shape's position/size and the marker shape is removed.
+        Markers whose key is not present in ``images`` are removed without inserting
+        anything (so no marker text leaks into the output).
+
+        Args:
+            slide: The slide to process
+            images: Mapping of marker key to an image spec dict:
+                - ``data`` (bytes) or ``path`` (str/Path): the image source
+                - ``fit``: ``"contain"`` (default; letterbox, no cropping) or
+                  ``"cover"`` (fill the frame, center-cropped)
+        """
+        for shape in list(slide.shapes):
+            if not getattr(shape, "has_text_frame", False):
+                continue
+            match = _IMG_MARKER.search(shape.text_frame.text)
+            if not match:
+                continue
+            spec = images.get(match.group(1))
+            if spec is not None:
+                self._place_image(slide, shape, spec)
+            shape._element.getparent().remove(shape._element)
+
+    @staticmethod
+    def _place_image(slide: Slide, marker_shape, spec: dict):
+        """Insert the image described by ``spec`` at the marker shape's bounds."""
+        data = spec.get("data")
+        if data is None:
+            path = spec.get("path")
+            if path is None:
+                raise TemplateError("image spec must have 'data' (bytes) or 'path'")
+            data = Path(path).read_bytes()
+        fit = spec.get("fit", "contain")
+
+        left, top = marker_shape.left, marker_shape.top
+        frame_w, frame_h = marker_shape.width, marker_shape.height
+        with Image.open(io.BytesIO(data)) as image:
+            image_w, image_h = image.size
+
+        if fit == "cover":
+            # 枠を満たして中央クロップ（縦横比のはみ出しぶんを crop_* で切る）
+            picture = slide.shapes.add_picture(io.BytesIO(data), left, top, frame_w, frame_h)
+            frame_ratio = frame_w / frame_h
+            image_ratio = image_w / image_h
+            if image_ratio > frame_ratio:
+                crop = (1 - frame_ratio / image_ratio) / 2
+                picture.crop_left = picture.crop_right = crop
+            elif image_ratio < frame_ratio:
+                crop = (1 - image_ratio / frame_ratio) / 2
+                picture.crop_top = picture.crop_bottom = crop
+        else:
+            # contain: 枠内に収めて中央配置（レターボックス。内容を切らない）
+            scale = min(frame_w / image_w, frame_h / image_h)
+            width, height = int(image_w * scale), int(image_h * scale)
+            picture_left = int(left + (frame_w - width) / 2)
+            picture_top = int(top + (frame_h - height) / 2)
+            slide.shapes.add_picture(io.BytesIO(data), picture_left, picture_top, width, height)
+
     def _expand_table_rows(self, slide: Slide, table_rows: Dict[str, list]):
         """
         Expand table template rows into one row per data item.
@@ -436,6 +504,9 @@ class TemplateEngine:
             src_page = slide_config["src_page"]
             replace_texts = slide_config.get("replace_texts", {})
             replace_table_rows = slide_config.get("replace_table_rows", {})
+            replace_images = slide_config.get("replace_images", {})
+            if not isinstance(replace_images, dict) or any(not isinstance(spec, dict) for spec in replace_images.values()):
+                raise TemplateError(f"'replace_images' at index {idx} must be a dict of image spec dicts")
             if not isinstance(replace_table_rows, dict) or any(
                 not isinstance(rows, list) or any(not isinstance(item, dict) for item in rows)
                 for rows in replace_table_rows.values()
@@ -469,6 +540,9 @@ class TemplateEngine:
                 self._expand_table_rows(new_slide, replace_table_rows)
             if replace_texts:
                 self._replace_placeholders_in_slide(new_slide, replace_texts)
+            # Resolve image markers last. Runs even when replace_images is empty so
+            # unassigned {{ img:key }} markers never leak into the output.
+            self._replace_images(new_slide, replace_images)
 
         # Save output
         try:

@@ -635,3 +635,135 @@ class TestTemplateEngineTableRows:
                 {"slides": [{"src_page": 1, "replace_table_rows": {"rows": "not-a-list"}}]},
                 temp_dir / "out.pptx",
             )
+
+
+@pytest.fixture
+def image_template(temp_dir):
+    """Create a template with {{ img:key }} marker shapes."""
+    template_path = temp_dir / "image_template.pptx"
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[5])
+    marker1 = slide.shapes.add_textbox(Inches(1), Inches(1), Inches(4), Inches(3))
+    marker1.text_frame.text = "{{ img:photo1 }}"
+    marker2 = slide.shapes.add_textbox(Inches(6), Inches(1), Inches(3), Inches(3))
+    marker2.text_frame.text = "{{ img:photo2 }}"
+    prs.save(str(template_path))
+    return template_path
+
+
+def _png_bytes(width=200, height=100):
+    from PIL import Image as PILImage
+    import io as _io
+
+    buffer = _io.BytesIO()
+    PILImage.new("RGB", (width, height), "navy").save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def _pictures_and_texts(pptx_path):
+    prs = Presentation(str(pptx_path))
+    pictures, texts = [], []
+    for shape in prs.slides[0].shapes:
+        if shape.shape_type == 13:  # PICTURE
+            pictures.append(shape)
+        elif getattr(shape, "has_text_frame", False) and shape.text_frame.text.strip():
+            texts.append(shape.text_frame.text)
+    return pictures, texts
+
+
+class TestTemplateEngineImages:
+    """Tests for {{ img:key }} image marker embedding."""
+
+    def test_contain_fits_inside_marker_bounds(self, image_template, temp_dir):
+        engine = TemplateEngine(image_template)
+        output = temp_dir / "out.pptx"
+        engine.process(
+            {"slides": [{"src_page": 1, "replace_images": {"photo1": {"data": _png_bytes(), "fit": "contain"}}}]},
+            output,
+        )
+        pictures, texts = _pictures_and_texts(output)
+        assert len(pictures) == 1
+        picture = pictures[0]
+        # 200x100 (2:1) を 4x3 インチ枠に contain → 幅いっぱい・高さは半分（枠内・切らない）
+        assert picture.width == Inches(4)
+        assert picture.height == Inches(2)
+        assert picture.top == Inches(1) + Inches(0.5)  # 縦中央
+        assert not any("img:" in t for t in texts)  # マーカーは残らない
+
+    def test_cover_fills_and_crops(self, image_template, temp_dir):
+        engine = TemplateEngine(image_template)
+        output = temp_dir / "out.pptx"
+        engine.process(
+            {"slides": [{"src_page": 1, "replace_images": {"photo2": {"data": _png_bytes(), "fit": "cover"}}}]},
+            output,
+        )
+        pictures, _ = _pictures_and_texts(output)
+        assert len(pictures) == 1
+        picture = pictures[0]
+        assert picture.width == Inches(3) and picture.height == Inches(3)  # 枠を満たす
+        assert picture.crop_left > 0 and picture.crop_left == picture.crop_right  # 中央クロップ
+
+    def test_fit_defaults_to_contain(self, image_template, temp_dir):
+        engine = TemplateEngine(image_template)
+        output = temp_dir / "out.pptx"
+        engine.process(
+            {"slides": [{"src_page": 1, "replace_images": {"photo1": {"data": _png_bytes()}}}]},
+            output,
+        )
+        pictures, _ = _pictures_and_texts(output)
+        assert pictures[0].crop_left == 0  # contain は切らない
+
+    def test_unassigned_markers_are_removed(self, image_template, temp_dir):
+        engine = TemplateEngine(image_template)
+        output = temp_dir / "out.pptx"
+        engine.process({"slides": [{"src_page": 1}]}, output)  # replace_images なし
+        pictures, texts = _pictures_and_texts(output)
+        assert pictures == []
+        assert not any("img:" in t for t in texts)
+
+    def test_image_from_path(self, image_template, temp_dir):
+        image_path = temp_dir / "photo.png"
+        image_path.write_bytes(_png_bytes())
+        engine = TemplateEngine(image_template)
+        output = temp_dir / "out.pptx"
+        engine.process(
+            {"slides": [{"src_page": 1, "replace_images": {"photo1": {"path": str(image_path)}}}]},
+            output,
+        )
+        pictures, _ = _pictures_and_texts(output)
+        assert len(pictures) == 1
+
+    def test_same_key_resolved_per_slide(self, image_template, temp_dir):
+        """同一テンプレページの複数回コピーでも slide 単位の指定で別画像になる。"""
+        engine = TemplateEngine(image_template)
+        output = temp_dir / "out.pptx"
+        engine.process(
+            {
+                "slides": [
+                    {"src_page": 1, "replace_images": {"photo1": {"data": _png_bytes(200, 100)}}},
+                    {"src_page": 1, "replace_images": {"photo1": {"data": _png_bytes(100, 200)}}},
+                ]
+            },
+            output,
+        )
+        prs = Presentation(str(output))
+        sizes = []
+        for slide in prs.slides:
+            for shape in slide.shapes:
+                if shape.shape_type == 13:
+                    sizes.append((shape.width, shape.height))
+        assert len(sizes) == 2
+        assert sizes[0] != sizes[1]  # 縦横比の違いが配置に反映されている
+
+    def test_invalid_spec_raises(self, image_template, temp_dir):
+        engine = TemplateEngine(image_template)
+        with pytest.raises(TemplateError, match="replace_images"):
+            engine.process(
+                {"slides": [{"src_page": 1, "replace_images": {"photo1": "not-a-dict"}}]},
+                temp_dir / "out.pptx",
+            )
+        with pytest.raises(TemplateError, match="data.*path|'data'"):
+            engine.process(
+                {"slides": [{"src_page": 1, "replace_images": {"photo1": {"fit": "cover"}}}]},
+                temp_dir / "out.pptx",
+            )
