@@ -8,6 +8,7 @@ PowerPointテンプレートエンジン - スライドのコピーとプレー�
 - `{{ }}` で囲まれたプレースホルダーを置換
 - ネストされたオブジェクトへのアクセス（例: `{{ user.name }}`）
 - 配列要素へのアクセス（例: `{{ items[0].name }}`）
+- 画像埋め込み（`{{ img:key }}` マーカー・`contain`/`cover` フィット。SVGはベクターのままネイティブ埋め込み＋PNGフォールバック）
 - JSON設定ファイルによる一括処理
 
 ## インストール
@@ -308,6 +309,20 @@ pptx-templatex template.pptx config.json hanako_presentation.pptx
 - ``replace_images`` にキーが無いマーカーは**削除**されます（マーカー文字列が出力に
   漏れない）。キーはスライド単位で解決されるため、同じテンプレページを複数回コピーして
   別々の画像を入れられます
+
+#### SVG画像
+
+SVGソース（``.svg`` の ``path``、またはSVGドキュメントの ``data``）は、
+``asvg:svgBlip`` 拡張を使って**ベクターのままネイティブ埋め込み**されます。
+同時にマーカー枠の3倍解像度でラスタライズしたPNGフォールバックも埋め込むため、
+PowerPoint 2019 / Microsoft 365 ではベクター描画、古いビューアや変換ツール
+（Keynote・Google Slides等）ではPNG側で表示されます。
+
+SVG対応にはオプショナル依存の ``resvg-py`` が必要です:
+
+```bash
+pip install 'pptx-templatex[svg]'
+```
 
 ### プレースホルダーの記法
 

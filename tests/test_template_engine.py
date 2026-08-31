@@ -768,3 +768,114 @@ class TestTemplateEngineImages:
                 {"slides": [{"src_page": 1, "replace_images": {"photo1": {"fit": "cover"}}}]},
                 temp_dir / "out.pptx",
             )
+
+
+def _svg_bytes(view_w=24, view_h=24):
+    return (
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {view_w} {view_h}">'
+        f'<rect width="{view_w}" height="{view_h}" fill="black"/></svg>'
+    ).encode("utf-8")
+
+
+class TestTemplateEngineSvgImages:
+    """Tests for SVG sources in replace_images (native svgBlip embedding)."""
+
+    def _read_part(self, pptx_path, name):
+        import zipfile
+
+        with zipfile.ZipFile(str(pptx_path)) as z:
+            return z.read(name).decode("utf-8")
+
+    def test_svg_embeds_natively_with_png_fallback(self, image_template, temp_dir):
+        pytest.importorskip("resvg_py")
+        engine = TemplateEngine(image_template)
+        output = temp_dir / "out.pptx"
+        engine.process(
+            {"slides": [{"src_page": 1, "replace_images": {"photo1": {"data": _svg_bytes()}}}]},
+            output,
+        )
+        # フォールバックPNGのpictureが配置され、通常の画像として開ける
+        pictures, texts = _pictures_and_texts(output)
+        assert len(pictures) == 1
+        assert pictures[0].image.content_type == "image/png"
+        assert not any("img:" in t for t in texts)
+        # SVGパート・Content-Type・svgBlip拡張が揃っている
+        slide_xml = self._read_part(output, "ppt/slides/slide1.xml")
+        assert "asvg:svgBlip" in slide_xml
+        assert "{96DAC541-7B7A-43D3-8B79-37D633B846F1}" in slide_xml
+        assert "image/svg+xml" in self._read_part(output, "[Content_Types].xml")
+        rels = self._read_part(output, "ppt/slides/_rels/slide1.xml.rels")
+        assert ".svg" in rels
+
+    def test_svg_from_path_with_xml_declaration(self, image_template, temp_dir):
+        pytest.importorskip("resvg_py")
+        svg_path = temp_dir / "icon.svg"
+        svg_path.write_bytes(b'<?xml version="1.0" encoding="UTF-8"?>\n' + _svg_bytes())
+        engine = TemplateEngine(image_template)
+        output = temp_dir / "out.pptx"
+        engine.process(
+            {"slides": [{"src_page": 1, "replace_images": {"photo1": {"path": str(svg_path)}}}]},
+            output,
+        )
+        assert "asvg:svgBlip" in self._read_part(output, "ppt/slides/slide1.xml")
+
+    def test_svg_cover_crops_like_raster(self, image_template, temp_dir):
+        pytest.importorskip("resvg_py")
+        engine = TemplateEngine(image_template)
+        output = temp_dir / "out.pptx"
+        engine.process(
+            {
+                "slides": [
+                    {
+                        "src_page": 1,
+                        # 2:1 のSVGを 3x3 インチ枠に cover → 左右中央クロップ
+                        "replace_images": {"photo2": {"data": _svg_bytes(24, 12), "fit": "cover"}},
+                    }
+                ]
+            },
+            output,
+        )
+        pictures, _ = _pictures_and_texts(output)
+        picture = pictures[0]
+        assert picture.width == Inches(3) and picture.height == Inches(3)
+        assert picture.crop_left > 0 and picture.crop_left == picture.crop_right
+
+    def test_svg_contain_preserves_aspect_ratio(self, image_template, temp_dir):
+        pytest.importorskip("resvg_py")
+        engine = TemplateEngine(image_template)
+        output = temp_dir / "out.pptx"
+        engine.process(
+            # 2:1 のSVGを 4x3 インチ枠に contain → 幅4in・高さ2in
+            {"slides": [{"src_page": 1, "replace_images": {"photo1": {"data": _svg_bytes(24, 12)}}}]},
+            output,
+        )
+        pictures, _ = _pictures_and_texts(output)
+        assert pictures[0].width == Inches(4)
+        assert pictures[0].height == Inches(2)
+
+    def test_invalid_svg_raises(self, image_template, temp_dir):
+        pytest.importorskip("resvg_py")
+        engine = TemplateEngine(image_template)
+        with pytest.raises(TemplateError, match="rasterize"):
+            engine.process(
+                {"slides": [{"src_page": 1, "replace_images": {"photo1": {"data": b"<svg broken"}}}]},
+                temp_dir / "out.pptx",
+            )
+
+    def test_missing_resvg_raises_helpful_error(self, image_template, temp_dir, monkeypatch):
+        import builtins
+
+        real_import = builtins.__import__
+
+        def fake_import(name, *args, **kwargs):
+            if name == "resvg_py":
+                raise ImportError("No module named 'resvg_py'")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", fake_import)
+        engine = TemplateEngine(image_template)
+        with pytest.raises(TemplateError, match="resvg-py"):
+            engine.process(
+                {"slides": [{"src_page": 1, "replace_images": {"photo1": {"data": _svg_bytes()}}}]},
+                temp_dir / "out.pptx",
+            )
