@@ -12,7 +12,7 @@ A PowerPoint template engine for Python that provides slide copying and placehol
 - Support for array element access (e.g., `{{ items[0].name }}`, `{{ users.[0].email }}`)
 - Batch processing with JSON configuration files
 - Table support: placeholder replacement in cells and variable-length row expansion (`replace_table_rows`)
-- Image embedding: `{{ img:key }}` marker shapes replaced by images with `contain`/`cover` fitting (`replace_images`)
+- Image embedding: `{{ img:key }}` marker shapes replaced by images with `contain`/`cover` fitting (`replace_images`); SVG sources are embedded natively as vectors with a PNG fallback
 
 ## Installation
 
@@ -317,6 +317,20 @@ placed at the marker shape's position/size and the marker is removed:
 - Markers whose key is not present in ``replace_images`` are **removed** (no marker text
   leaks into the output). Keys are resolved per slide, so copying the same template page
   multiple times with different images just works
+
+#### SVG images
+
+SVG sources (a ``path`` ending in ``.svg`` or ``data`` containing an SVG document) are
+embedded **natively as vectors** using the ``asvg:svgBlip`` extension, together with a
+high-resolution PNG fallback rasterized at 3x the marker bounds. PowerPoint 2019 /
+Microsoft 365 render the crisp vector; older viewers (and converters such as Keynote or
+Google Slides) fall back to the PNG.
+
+SVG support requires the optional ``resvg-py`` dependency:
+
+```bash
+pip install 'pptx-templatex[svg]'
+```
 
 ### Placeholder Syntax
 

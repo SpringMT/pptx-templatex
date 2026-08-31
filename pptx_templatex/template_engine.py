@@ -12,6 +12,8 @@ from PIL import Image
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 from pptx.enum.dml import MSO_COLOR_TYPE
+from pptx.opc.constants import RELATIONSHIP_TYPE as RT
+from pptx.opc.package import Part
 from pptx.oxml.ns import qn
 from pptx.slide import Slide
 from pptx.util import Pt
@@ -23,6 +25,15 @@ from .rich_text_parser import TextSegment, is_rich_text, parse_rich_text
 
 # `{{ img:key }}` 画像マーカー。key は英数・. - _ [ ] を許可（nested/index キーに合わせる）。
 _IMG_MARKER = re.compile(r"\{\{\s*img:([\w.\-\[\]]+)\s*\}\}")
+
+# PowerPoint 2019 / Microsoft 365 がベクター描画に使う svgBlip 拡張
+_SVG_NS = "http://schemas.microsoft.com/office/drawing/2016/SVG/main"
+_SVG_EXT_URI = "{96DAC541-7B7A-43D3-8B79-37D633B846F1}"
+
+# SVGフォールバックPNGのラスタライズ倍率（配置枠に対して）。
+# 旧PowerPoint・Keynote・Google Slides等はフォールバック側で表示されるため高めにしておく。
+_SVG_FALLBACK_SCALE = 3
+_EMU_PER_PX = 914400 // 96  # 96dpi換算
 
 
 class TemplateEngine:
@@ -259,7 +270,11 @@ class TemplateEngine:
         Args:
             slide: The slide to process
             images: Mapping of marker key to an image spec dict:
-                - ``data`` (bytes) or ``path`` (str/Path): the image source
+                - ``data`` (bytes) or ``path`` (str/Path): the image source.
+                  Raster formats (PNG/JPEG/...) are placed as-is. SVG sources are
+                  embedded natively (``asvg:svgBlip``) with a rasterized PNG
+                  fallback; this requires the optional ``resvg-py`` dependency
+                  (``pip install 'pptx-templatex[svg]'``).
                 - ``fit``: ``"contain"`` (default; letterbox, no cropping) or
                   ``"cover"`` (fill the frame, center-cropped)
         """
@@ -274,8 +289,8 @@ class TemplateEngine:
                 self._place_image(slide, shape, spec)
             shape._element.getparent().remove(shape._element)
 
-    @staticmethod
-    def _place_image(slide: Slide, marker_shape, spec: dict):
+    @classmethod
+    def _place_image(cls, slide: Slide, marker_shape, spec: dict):
         """Insert the image described by ``spec`` at the marker shape's bounds."""
         data = spec.get("data")
         if data is None:
@@ -287,6 +302,12 @@ class TemplateEngine:
 
         left, top = marker_shape.left, marker_shape.top
         frame_w, frame_h = marker_shape.width, marker_shape.height
+
+        # SVGはフォールバックPNGにラスタライズして配置し、後段でSVG本体をsvgBlipとして付与する
+        svg_data = data if cls._is_svg(data) else None
+        if svg_data is not None:
+            data = cls._rasterize_svg(svg_data, frame_w, frame_h)
+
         with Image.open(io.BytesIO(data)) as image:
             image_w, image_h = image.size
 
@@ -307,7 +328,56 @@ class TemplateEngine:
             width, height = int(image_w * scale), int(image_h * scale)
             picture_left = int(left + (frame_w - width) / 2)
             picture_top = int(top + (frame_h - height) / 2)
-            slide.shapes.add_picture(io.BytesIO(data), picture_left, picture_top, width, height)
+            picture = slide.shapes.add_picture(io.BytesIO(data), picture_left, picture_top, width, height)
+
+        if svg_data is not None:
+            cls._attach_svg(slide, picture, svg_data)
+
+    @staticmethod
+    def _is_svg(data: bytes) -> bool:
+        """Return True if ``data`` looks like an SVG document."""
+        return b"<svg" in data[:2048]
+
+    @staticmethod
+    def _rasterize_svg(svg_data: bytes, frame_w: int, frame_h: int) -> bytes:
+        """Render ``svg_data`` to PNG bytes sized for the frame (aspect ratio preserved)."""
+        try:
+            import resvg_py  # noqa: PLC0415
+        except ImportError:
+            raise TemplateError(
+                "SVG images require the 'resvg-py' package. "
+                "Install it with: pip install 'pptx-templatex[svg]'"
+            )
+        max_px = 4096
+        px_w = min(max_px, max(1, round(frame_w / _EMU_PER_PX) * _SVG_FALLBACK_SCALE))
+        px_h = min(max_px, max(1, round(frame_h / _EMU_PER_PX) * _SVG_FALLBACK_SCALE))
+        try:
+            # width/height 両指定時は resvg がアスペクト比を保って内接サイズに丸める
+            return bytes(
+                resvg_py.svg_to_bytes(svg_string=svg_data.decode("utf-8"), width=px_w, height=px_h)
+            )
+        except Exception as e:
+            raise TemplateError(f"Failed to rasterize SVG: {str(e)}")
+
+    @staticmethod
+    def _attach_svg(slide: Slide, picture, svg_data: bytes):
+        """
+        Attach the original SVG to ``picture`` via the ``asvg:svgBlip`` extension.
+
+        The picture keeps its PNG blip as a fallback for viewers without SVG
+        support; PowerPoint 2019 / Microsoft 365 render the SVG part instead.
+        """
+        package = slide.part.package
+        partname = package.next_partname("/ppt/media/image%d.svg")
+        svg_part = Part(partname, "image/svg+xml", package, blob=svg_data)
+        rId = slide.part.relate_to(svg_part, RT.IMAGE)
+
+        blip = picture._element.blipFill.find(qn("a:blip"))
+        extLst = etree.SubElement(blip, qn("a:extLst"))
+        ext = etree.SubElement(extLst, qn("a:ext"))
+        ext.set("uri", _SVG_EXT_URI)
+        svgBlip = etree.SubElement(ext, "{%s}svgBlip" % _SVG_NS, nsmap={"asvg": _SVG_NS})
+        svgBlip.set(qn("r:embed"), rId)
 
     def _expand_table_rows(self, slide: Slide, table_rows: Dict[str, list]):
         """

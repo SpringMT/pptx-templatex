@@ -36,6 +36,9 @@ Repository = "https://github.com/SpringMT/pptx-templatex"
 Issues = "https://github.com/SpringMT/pptx-templatex/issues"
 
 [project.optional-dependencies]
+svg = [
+    "resvg-py>=0.5.0; python_version >= '3.10'",
+]
 dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
